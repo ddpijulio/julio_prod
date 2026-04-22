@@ -2,19 +2,21 @@
 
 ## 1. Objetivo
 
-Construir una aplicación en Python (Streamlit) que:
+Construir y mantener una aplicación en Python (Streamlit) que:
 - Lea un archivo Excel como fuente única de datos
-- Muestre un dashboard de productividad en una sola pantalla
-- Ayude a tomar decisiones diarias (priorización, carga, alertas)
-- NO permita edición de datos (solo lectura en esta fase)
+- Muestre un dashboard ejecutivo y operativo en modo solo lectura
+- Ayude a tomar decisiones diarias (priorización, carga, alertas, agenda)
+- Tolere variaciones comunes de captura manual en el Excel
 
 ---
 
 ## 2. Fuente de datos
 
-Archivo Excel (ubicado en raíz del repo o ruta local):
+Archivo Excel ubicado en la raíz del repo o en una ruta local indicada por el usuario desde la barra lateral.
 
-G:\Mi unidad\Sistema_Productividad_JC_PRO.xlsx
+Archivo por defecto en este repo:
+
+`Sistema_Productividad_JC_PLANTILLA_EJEMPLO.xlsx`
 
 ---
 
@@ -111,11 +113,14 @@ Bloqueado = Sí
 3. Alta prioridad no iniciadas:
 Prioridad = Alta AND Estado = No iniciado
 
+4. Próximos vencimientos:
+Fecha_limite_opcional entre la fecha de análisis y los próximos 3 o 7 días AND Estado no cerrado
+
 ---
 
 ### 4.4 Inbox
 
-Mostrar todas las entradas del día actual
+Mostrar todas las entradas del día seleccionado para análisis
 
 Diferenciar:
 - Tipo_resolucion = Directo
@@ -142,36 +147,70 @@ Mostrar:
 
 ---
 
+### 4.7 Salud operativa
+
+La aplicación calcula una etiqueta de salud para proyectos y tareas:
+- Verde: sin señales críticas
+- Amarillo: atención por carga abierta o falta de avance
+- Rojo: riesgo alto por bloqueos o acumulación de vencimientos cercanos
+
+---
+
+### 4.8 Agenda consolidada
+
+La agenda combina:
+- Fechas objetivo de tareas
+- Fechas límite de subtareas
+- Entradas del inbox con fecha
+
+Se muestran vistas:
+- del día
+- semanal
+- calendario mensual
+
+---
+
 ## 5. Interfaz (Streamlit)
 
-### Estructura de la pantalla:
+### 5.1 Barra lateral
 
-1. Título: Panel de Productividad JC
+- Selector de archivo Excel
+- Fecha de análisis
+- Filtros globales por tipo de proyecto, prioridad y estado
 
-2. Secciones:
+### 5.2 Encabezado principal
 
-#### 🎯 FOCO DEL DÍA
-Tabla con subtareas activas
+- Título: Panel de Productividad JC
+- Resumen rápido de actividades del día, carga estimada y reuniones pendientes
+- Métricas de proyectos, tareas activas, subtareas abiertas y elementos en riesgo
 
-#### 🔴 ALERTAS
-Listas de:
-- vencidos
-- bloqueados
-- alta prioridad
+### 5.3 Pestañas principales
 
-#### ⚡ CARGA DEL DÍA
-Texto con:
-- horas totales
-- mensaje (OK / Sobrecargado)
+#### Hoy
+- Foco del día
+- Alertas resumidas
+- Carga e inbox
+- Agenda del día
 
-#### 📥 INBOX
-Tabla de entradas
+#### Resumen
+- Vista general de proyectos
+- Composición del portafolio
+- Avance estratégico
+- Resumen reactivo
+- Resumen estratégico
 
-#### 🔄 REACTIVO
-Resumen de flujo
+#### Ejecución
+- Nivel tareas
+- Alertas detalladas
+- Reuniones pendientes
+- Carga del día
+- Actividades del día
+- Inbox del día
 
-#### 🧱 ESTRATÉGICO
-Resumen de proyectos
+#### Agenda
+- Calendario mensual
+- Agenda del día
+- Vista semanal
 
 ---
 
@@ -181,6 +220,10 @@ Resumen de proyectos
 - No todas las entradas del inbox generan subtareas
 - Reuniones son subtareas
 - No eliminar registros, solo cambiar estado
+- La fecha de análisis por defecto es la más reciente encontrada en `Inbox_Diario`
+- La capacidad recomendada del día es 6 horas
+- La app valida columnas obligatorias antes de renderizar
+- La app normaliza variaciones comunes de acentos para evitar excluir datos válidos
 
 ---
 
@@ -190,6 +233,7 @@ Resumen de proyectos
 - pandas
 - streamlit
 - openpyxl
+- altair opcional para gráficos; si no está instalada se usan gráficos de respaldo
 
 ---
 
@@ -197,7 +241,7 @@ Resumen de proyectos
 
 Instalar dependencias:
 
-pip install streamlit pandas openpyxl
+pip install -r requirements.txt
 
 Ejecutar:
 
@@ -212,4 +256,5 @@ Responder:
 ¿Qué hago hoy?
 ¿Estoy sobrecargado?
 ¿Qué está en riesgo?
-
+¿Cómo se distribuye mi portafolio?
+¿Qué viene esta semana y este mes?

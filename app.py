@@ -3,6 +3,7 @@ from __future__ import annotations
 import calendar
 from datetime import date
 from pathlib import Path
+import unicodedata
 
 try:
     import altair as alt
@@ -16,6 +17,56 @@ import streamlit as st
 DEFAULT_FILE = "Sistema_Productividad_JC_PLANTILLA_EJEMPLO.xlsx"
 CAPACIDAD_RECOMENDADA = 6.0
 ESTADOS_CERRADOS = {"terminado", "hecho", "cerrado"}
+REQUIRED_SHEETS = ("Proyectos", "Tareas", "Subtareas", "Inbox_Diario")
+REQUIRED_COLUMNS = {
+    "Proyectos": {
+        "ID_Proyecto",
+        "Proyecto",
+        "Tipo_Proyecto",
+        "Estado",
+        "Prioridad",
+        "Avance %",
+        "Fecha_objetivo",
+        "Pendientes",
+        "Hoy_recibidos",
+        "Hoy_cerrados",
+    },
+    "Tareas": {
+        "ID_Tarea",
+        "ID_Proyecto",
+        "Tarea",
+        "Tipo_Tarea",
+        "Estado",
+        "Prioridad",
+        "Fecha_objetivo",
+    },
+    "Subtareas": {
+        "ID_Subtarea",
+        "ID_Tarea",
+        "Subtarea",
+        "Tipo",
+        "Estado",
+        "Prioridad",
+        "Hoy",
+        "Duracion_estimada",
+        "Duracion_real",
+        "Origen",
+        "Bloqueado",
+        "Fecha_limite_opcional",
+    },
+    "Inbox_Diario": {
+        "Fecha",
+        "Hora",
+        "Entrada",
+        "Tipo",
+        "Urgencia",
+        "Origen",
+        "Acción rápida",
+        "Tipo_resolucion",
+        "Estado",
+        "ID_Subtarea",
+    },
+}
 ALERT_COLUMNS = [
     "ID_Subtarea",
     "Subtarea",
@@ -58,16 +109,41 @@ def normalize_text(value: object) -> str:
     return str(value).strip()
 
 
+def normalized_token(value: object) -> str:
+    text = normalize_text(value).lower()
+    if not text:
+        return ""
+    return "".join(
+        char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char)
+    )
+
+
 def is_yes(value: object) -> bool:
-    return normalize_text(value).lower() in {"si", "sí", "s", "yes", "true", "1"}
+    return normalized_token(value) in {"si", "s", "yes", "true", "1"}
 
 
 def is_closed(value: object) -> bool:
-    return normalize_text(value).lower() in ESTADOS_CERRADOS
+    return normalized_token(value) in ESTADOS_CERRADOS
 
 
 def priority_rank(value: object) -> int:
-    return PRIORITY_ORDER.get(normalize_text(value), 9)
+    token = normalized_token(value)
+    normalized_priority = {
+        "alta": "Alta",
+        "media": "Media",
+        "baja": "Baja",
+    }.get(token, normalize_text(value))
+    return PRIORITY_ORDER.get(normalized_priority, 9)
+
+
+def validate_required_columns(sheets: dict[str, pd.DataFrame]) -> None:
+    for sheet_name in REQUIRED_SHEETS:
+        missing_columns = sorted(REQUIRED_COLUMNS[sheet_name] - set(sheets[sheet_name].columns))
+        if missing_columns:
+            missing_text = ", ".join(missing_columns)
+            raise ValueError(
+                f"La hoja '{sheet_name}' no tiene todas las columnas requeridas. Faltan: {missing_text}"
+            )
 
 
 def find_default_excel() -> str:
@@ -97,6 +173,15 @@ def load_excel_data(path: str) -> dict[str, pd.DataFrame]:
 
     for df in (projects, tasks, subtasks, inbox):
         df.columns = [normalize_text(col) for col in df.columns]
+
+    validate_required_columns(
+        {
+            "Proyectos": projects,
+            "Tareas": tasks,
+            "Subtareas": subtasks,
+            "Inbox_Diario": inbox,
+        }
+    )
 
     for column in ["Fecha_objetivo"]:
         if column in projects:
@@ -964,8 +1049,11 @@ def build_upcoming_table(subtasks: pd.DataFrame, analysis_date: date, days: int)
     if upcoming.empty:
         return empty_table(ALERT_COLUMNS)
 
+    upcoming = upcoming.sort_values(
+        ["Fecha_limite_opcional", "Prioridad", "Proyecto", "Tarea", "ID_Subtarea"]
+    )
     upcoming["Fecha limite"] = upcoming["Fecha_limite_opcional"].apply(format_date)
-    return upcoming[ALERT_COLUMNS].sort_values(["Fecha limite", "Prioridad", "Proyecto", "Tarea"])
+    return upcoming[ALERT_COLUMNS]
 
 
 def build_inbox_table(inbox: pd.DataFrame, analysis_date: date) -> pd.DataFrame:
@@ -1044,14 +1132,12 @@ def build_project_overview(
             "Bloqueadas",
             "Por vencer 7d",
         ]
-    ].sort_values(["Prioridad", "Tipo_Proyecto", "Proyecto"])
+    ].sort_values(["Prioridad", "Tipo_Proyecto", "Proyecto"], key=lambda col: col.map(priority_rank) if col.name == "Prioridad" else col)
 
 
 def build_task_overview(tasks: pd.DataFrame, subtasks: pd.DataFrame, analysis_date: date) -> pd.DataFrame:
     end_date = analysis_date + pd.Timedelta(days=7)
     task_view = tasks.copy()
-    task_view["Fecha objetivo"] = task_view["Fecha_objetivo"].apply(format_date)
-
     open_subtasks = subtasks[~subtasks["Estado"].apply(is_closed)].copy()
     in_progress = subtasks[subtasks["Estado"].astype(str).str.lower().eq("en proceso")].copy()
     total_subtasks = subtasks.groupby("ID_Tarea").size().rename("Total subtareas")
@@ -1092,6 +1178,11 @@ def build_task_overview(tasks: pd.DataFrame, subtasks: pd.DataFrame, analysis_da
         ),
         axis=1,
     )
+    task_view = task_view.sort_values(
+        ["Prioridad", "Fecha_objetivo", "Proyecto", "Tarea"],
+        key=lambda col: col.map(priority_rank) if col.name == "Prioridad" else col,
+    )
+    task_view["Fecha objetivo"] = task_view["Fecha_objetivo"].apply(format_date)
 
     return task_view[
         [
@@ -1108,11 +1199,11 @@ def build_task_overview(tasks: pd.DataFrame, subtasks: pd.DataFrame, analysis_da
             "Bloqueadas",
             "Por vencer 7d",
         ]
-    ].sort_values(["Prioridad", "Fecha objetivo", "Proyecto", "Tarea"])
+    ]
 
 
 def build_reactive_summary(projects: pd.DataFrame) -> pd.DataFrame:
-    reactive = projects[projects["Tipo_Proyecto"].astype(str).str.lower().eq("reactivo")].copy()
+    reactive = projects[projects["Tipo_Proyecto"].apply(normalized_token).eq("reactivo")].copy()
     if reactive.empty:
         return reactive
 
@@ -1132,7 +1223,7 @@ def build_reactive_summary(projects: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_strategic_summary(projects: pd.DataFrame) -> pd.DataFrame:
-    strategic = projects[projects["Tipo_Proyecto"].astype(str).str.lower().eq("estratégico")].copy()
+    strategic = projects[projects["Tipo_Proyecto"].apply(normalized_token).eq("estrategico")].copy()
     if strategic.empty:
         return strategic
 
@@ -1145,7 +1236,7 @@ def build_strategic_summary(projects: pd.DataFrame) -> pd.DataFrame:
 
 def build_pending_meetings(subtasks: pd.DataFrame, inbox: pd.DataFrame, analysis_date: date) -> pd.DataFrame:
     meetings = subtasks[
-        subtasks["Tipo"].astype(str).str.lower().eq("reunión") & ~subtasks["Estado"].apply(is_closed)
+        subtasks["Tipo"].apply(normalized_token).eq("reunion") & ~subtasks["Estado"].apply(is_closed)
     ].copy()
     if meetings.empty:
         return pd.DataFrame(
@@ -1158,11 +1249,12 @@ def build_pending_meetings(subtasks: pd.DataFrame, inbox: pd.DataFrame, analysis
     meetings = meetings[
         meetings["Fecha evento"].isna() | meetings["Fecha evento"].ge(analysis_date)
     ].copy()
+    meetings = meetings.sort_values(["Fecha", "Hora", "Prioridad", "Subtarea"])
     meetings["Fecha"] = meetings["Fecha"].apply(format_date)
     meetings["Hora"] = meetings["Hora"].apply(normalize_text)
     return meetings[
         ["Fecha", "Hora", "Subtarea", "Proyecto", "Tarea", "Prioridad", "Estado_x"]
-    ].rename(columns={"Estado_x": "Estado"}).sort_values(["Fecha", "Hora", "Prioridad"])
+    ].rename(columns={"Estado_x": "Estado"})
 
 
 def build_event_table(tasks: pd.DataFrame, subtasks: pd.DataFrame, inbox: pd.DataFrame) -> pd.DataFrame:
@@ -1264,8 +1356,9 @@ def build_week_view(events: pd.DataFrame, analysis_date: date) -> pd.DataFrame:
     if week_events.empty:
         return week_events
 
+    week_events = week_events.sort_values(["Fecha", "Hora", "Categoria", "Evento"])
     week_events["Fecha"] = week_events["Fecha"].apply(format_date)
-    return week_events.sort_values(["Fecha", "Hora", "Categoria", "Evento"])
+    return week_events
 
 
 def metric_card(label: str, value: str, help_text: str) -> None:
@@ -1368,9 +1461,9 @@ def main() -> None:
     total_focus_hours = float(focus["Horas"].sum()) if not focus.empty else 0.0
     overload = total_focus_hours > CAPACIDAD_RECOMENDADA
     at_risk_count = len(alerts["vencidos"]) + len(alerts["bloqueados"])
-    strategic_count = projects["Tipo_Proyecto"].astype(str).str.lower().eq("estratégico").sum()
-    reactive_count = projects["Tipo_Proyecto"].astype(str).str.lower().eq("reactivo").sum()
-    support_count = projects["Tipo_Proyecto"].astype(str).str.lower().eq("soporte").sum()
+    strategic_count = projects["Tipo_Proyecto"].apply(normalized_token).eq("estrategico").sum()
+    reactive_count = projects["Tipo_Proyecto"].apply(normalized_token).eq("reactivo").sum()
+    support_count = projects["Tipo_Proyecto"].apply(normalized_token).eq("soporte").sum()
 
     render_hero(analysis_date, len(focus), total_focus_hours, len(pending_meetings))
 
